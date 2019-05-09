@@ -36,19 +36,19 @@ level_scripts = ['nav_maze_random_goal_03',
                  'nav_maze_static_02',
                  'nav_maze_static_01']
 
-"""
-deepmind lab environment component
-"""
-LabInputFilter = NoInputFilter()
-# LabInputFilter = InputFilter(is_a_reference_filter=True)
+# filter for lab environment
+##  process the information passed into the agent from the environment.
+# LabInputFilter = NoInputFilter()
+LabInputFilter = InputFilter(is_a_reference_filter=True)
 # LabInputFilter.add_reward_filter('clipping', RewardClippingFilter(-1.0, 1.0))
-# LabInputFilter.add_observation_filter('observation', 'rescaling',
-#                                       ObservationRescaleToSizeFilter(
-#                                           ImageObservationSpace(np.array([84, 84, 3]), high=255)))
+LabInputFilter.add_observation_filter('observation', 'rescaling',
+                                      ObservationRescaleToSizeFilter(
+                                          ImageObservationSpace(np.array([84, 84, 3]), high=255)))
 LabInputFilter.add_observation_filter('observation', 'to_grayscale', ObservationRGBToYFilter())
 LabInputFilter.add_observation_filter('observation', 'to_uint8', ObservationToUInt8Filter(0, 255))
 # # stack last 4 images as s_t
 LabInputFilter.add_observation_filter('observation', 'stacking', ObservationStackingFilter(4))
+## what will we get from agent
 LabOutputFilter = NoOutputFilter()
 
 """
@@ -58,10 +58,10 @@ lab environment parameters
 
 class LabEnvironmentParameters(EnvironmentParameters):
 
-    def __init__(self, level, human_control=False, rotation=20, width=84, height=84, fps=60):
+    def __init__(self, level, human_control=False, random_initialization_steps=30, rotation=20, width=84, height=84, fps=60):
         super().__init__(level=level)
         self.frame_skip = 4
-        self.random_initialization_steps = 30
+        self.random_initialization_steps = random_initialization_steps
         self.default_input_filter = LabInputFilter
         self.default_output_filter = LabOutputFilter
         self.rotation = rotation
@@ -69,6 +69,7 @@ class LabEnvironmentParameters(EnvironmentParameters):
         self.width = width
         self.height = height
         self.fps = fps
+
 
     @property
     def path(self):
@@ -83,35 +84,41 @@ class LabEnvironment(Environment):
                  height: int,
                  fps: int,
                  custom_reward_threshold: Union[int, float], visualization_parameters: VisualizationParameters,
-                 record_depth_image: bool = False, target_success_rate: float = 1.0,
+                 random_initialization_steps: int,
+                 target_success_rate: float = 1.0,
                  **kwargs):
         super(LabEnvironment, self).__init__(level=level, seed=seed, frame_skip=frame_skip, human_control=human_control,
                                              custom_reward_threshold=custom_reward_threshold,
                                              visualization_parameters=visualization_parameters,
                                              target_success_rate=target_success_rate)
+        # other properties
+        self.target_success_rate = target_success_rate
+        self.random_initialization_steps = random_initialization_steps
         # deepmind lab environment
         ## environment
+        avaiable_observations = ['RGB_INTERLEAVED', 'RGBD_INTERLEAVED']
 
-        self.lab = deepmind_lab.Lab(self.env_id, ['RGBD_INTERLEAVED', 'RGB_INTERLEAVED'], config={'fps': str(fps), 'width': str(width), 'height': str(height)})
+        self.lab = deepmind_lab.Lab(self.env_id, avaiable_observations, config={'fps': str(fps), 'width': str(width), 'height': str(height)})
         ## action spec
         self.action_mapping, self.action_description, self.action_key_mapping = self._get_action_info(rotation=rotation)
         self.action_space = DiscreteActionSpace(num_actions=len(self.action_mapping),
-                                                descriptions=self.action_description, default_action=0)
+                                                descriptions=self.action_description)
         self.key_to_action = self.action_key_mapping
         ## state spec
-        self.record_depth = record_depth_image
-        self.state_space = StateSpace({})
-        rgb_obs = list(filter(lambda x: x['name'] == 'RGB_INTERLEAVED', self.lab.observation_spec()))[0]
 
+
+        rgb_obs = list(filter(lambda x: x['name'] == 'RGB_INTERLEAVED', self.lab.observation_spec()))[0]  # to get the size info
+
+        self.state_space = StateSpace(
+            {'depth': ImageObservationSpace(shape=np.hstack((rgb_obs['shape'][:2], [1])), high=255)})
         self.state_space['observation'] = ImageObservationSpace(shape=rgb_obs['shape'], high=255)
-        if self.record_depth:
-            pass
         # reset
         self.seed = seed if seed is not None else random.seed()
         #
-        self.lab.reset()
+        # self.lab.reset()
         self.reset_internal_state(True)
         # render
+        # self.native_rendering = True  # from rl_coach.renderer import Renderer  # may be you can define your own render class
         if self.is_rendered:
             image = self.get_rendered_image()
             scale = 1
@@ -120,7 +127,11 @@ class LabEnvironment(Environment):
             if not self.native_rendering:
                 self.renderer.create_screen(image.shape[1] * scale, image.shape[0] * scale)
 
-        self.target_success_rate = target_success_rate
+
+
+
+
+
 
     @staticmethod
     def _action(*entries):
@@ -134,7 +145,7 @@ class LabEnvironment(Environment):
         """
 
         action_list = [
-            None,  # no-op
+            self._action(0, 0, 0, 0, 0, 0, 0),  # no op
             self._action(-rotation, 0, 0, 0, 0, 0, 0),  # look_left
             self._action(rotation, 0, 0, 0, 0, 0, 0),  # look_right
             # _action(  0,  10,  0,  0, 0, 0, 0), # look_up
@@ -147,9 +158,8 @@ class LabEnvironment(Environment):
             # _action(  0,   0,  0,  0, 0, 1, 0), # jump
             # _action(  0,   0,  0,  0, 0, 0, 1)  # crouch
         ]
-        description_list = ['NO-OP', "LOOK_LEFT", "LOOK_RIGHT", "STRAFE_LEFT", "STRAFE_RIGHT", "FORWARD", "BACKWARD"]
+        description_list = ["NOOP", "LOOK_LEFT", "LOOK_RIGHT", "STRAFE_LEFT", "STRAFE_RIGHT", "FORWARD", "BACKWARD"]
         key_list = {
-            tuple(): 0,
             (locals.K_LEFT,): 1,
             (locals.K_RIGHT,): 2,
             (locals.K_4,): 3,
@@ -160,36 +170,58 @@ class LabEnvironment(Environment):
         return action_list, description_list, key_list
 
     def get_rendered_image(self):
-        return self.state['observation']
+        rgb = self.state['observation']
+        # d = self.state['depth']
+        return rgb
 
     def _take_action(self, action: ActionType):
-        if action == 0:
-            return
         reward = self.lab.step(action=self.action_mapping[action], num_steps=self.frame_skip)
+        self.done = not self._is_running()
         self.reward = reward
+        if self.done:
+            self.state['observation'] = None
+            self.state['depth'] = None
+        else:
+            obs = self.lab.observations()
+            self.state['observation'] = obs['RGB_INTERLEAVED']
+            self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
 
 
     def _is_running(self):
         return self.lab.is_running()
 
     def _update_state(self):
-        obs = self.lab.observations()
-        self.state['observation'] = obs['RGB_INTERLEAVED']
-        if self.record_depth:
-            pass
-        # other info
-        self.done = not self._is_running()
-        self.state['observation'] = self.lab.observations()['RGB_INTERLEAVED']
+        """
+        update the state
+        :return:
+        """
+        # sinc step update state, done, reward
+        if self.done:
+            self.reset_internal_state(force_environment_reset=True)
+
+
 
     def _restart_environment_episode(self, force_environment_reset=False):
         self.lab.reset(seed=self.seed)
-        self.step(action=self.action_space.default_action)
+
+        self._random_noop()
+
 
     def get_target_success_rate(self):
         return self.target_success_rate
 
     def close(self):
         self.lab.close()
+
+    def _random_noop(self):
+        # simulate a random initial environment state by stepping for a random number of times between 0 and 30
+        step_count = 0
+        random_initialization_steps = random.randint(1, self.random_initialization_steps)
+        while self.action_space is not None and (self.state is None or step_count < random_initialization_steps):
+            step_count += 1
+            self.step(self.action_space.default_action)
+
+
 
 
 
