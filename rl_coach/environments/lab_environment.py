@@ -176,6 +176,7 @@ class LabEnvironment(Environment):
 
     def _take_action(self, action: ActionType):
         reward = self.lab.step(action=self.action_mapping[action], num_steps=self.frame_skip)
+
         self.done = not self._is_running()
         self.reward = reward
         if self.done:
@@ -185,6 +186,7 @@ class LabEnvironment(Environment):
             obs = self.lab.observations()
             self.state['observation'] = obs['RGB_INTERLEAVED']
             self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
+
 
 
     def _is_running(self):
