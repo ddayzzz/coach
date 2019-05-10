@@ -43,6 +43,15 @@ def test_basic_rl_graph_manager_with_cartpole_dqn():
                                                               experiment_path="./experiments/test"))
     # graph_manager.improve()
 
+
+@pytest.mark.unit_test
+def test_basic_rl_graph_manager_with_lab_acer():
+    tf.reset_default_graph()
+    from rl_coach.presets.Lab_nav_maze_static_01_ACER import graph_manager
+    assert graph_manager
+    graph_manager.create_graph(task_parameters=TaskParameters(framework_type=Frameworks.tensorflow,
+                                                              experiment_path="./experiments/test"))
+
 # Test for identifying memory leak in restore_checkpoint
 @pytest.mark.unit_test
 def test_basic_rl_graph_manager_with_cartpole_dqn_and_repeated_checkpoint_restore():
@@ -71,3 +80,4 @@ if __name__ == '__main__':
     # test_basic_rl_graph_manager_with_cartpole_dqn_and_repeated_checkpoint_restore()
     #test_basic_rl_graph_manager_multithreaded_with_pong_a3c()
 	#test_basic_rl_graph_manager_with_doom_basic_dqn()
+    test_basic_rl_graph_manager_with_lab_acer()

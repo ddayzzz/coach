@@ -29,5 +29,17 @@ def test_get_QActionStateValue_predictions():
     # assert cartpole_dqn_predictions.shape == (1, 2)
 
 
+@pytest.mark.unit_test
+def test_get_QActionStateValue_predictions_lab():
+    tf.reset_default_graph()
+    from rl_coach.presets.Lab_nav_maze_static_01_ACER import graph_manager
+    assert graph_manager
+    graph_manager.create_graph(task_parameters=
+                                            TaskParameters(framework_type=Frameworks.tensorflow,
+                                                           experiment_path="./experiments/test"))
+    graph_manager.improve_steps.num_steps = 1
+    graph_manager.steps_between_evaluation_periods.num_steps = 5
+
 if __name__ == '__main__':
     test_get_QActionStateValue_predictions()
+    test_get_QActionStateValue_predictions_lab()
