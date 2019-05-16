@@ -94,6 +94,8 @@ class LabEnvironment(Environment):
         # other properties
         self.target_success_rate = target_success_rate
         self.random_initialization_steps = random_initialization_steps
+        self.last_depth = None
+        self.last_observation = None
         # deepmind lab environment
         ## environment
         avaiable_observations = ['RGB_INTERLEAVED', 'RGBD_INTERLEAVED']
@@ -176,16 +178,21 @@ class LabEnvironment(Environment):
 
     def _take_action(self, action: ActionType):
         reward = self.lab.step(action=self.action_mapping[action], num_steps=self.frame_skip)
-
-        self.done = not self._is_running()
+        # print(self.done)
+        # obs = self.lab.observations()
+        #
         self.reward = reward
-        if self.done:
-            self.state['observation'] = None
-            self.state['depth'] = None
-        else:
-            obs = self.lab.observations()
-            self.state['observation'] = obs['RGB_INTERLEAVED']
-            self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
+        #
+        # # print('REWARD:', reward, 'DONE:', self.done,' ACTION:', action)
+        # if self.done:
+        #     # sinc step update state, done, reward
+        #     # self.reset_internal_state(force_environment_reset=True)
+        #     self.state['observation'] = self.last_observation
+        #     self.state['depth'] = self.last_depth
+        # else:
+        #
+        #     self.state['observation'] = obs['RGB_INTERLEAVED']
+        #     self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
 
 
 
@@ -197,9 +204,16 @@ class LabEnvironment(Environment):
         update the state
         :return:
         """
-        # sinc step update state, done, reward
+        self.done = not self._is_running()
         if self.done:
-            self.reset_internal_state(force_environment_reset=True)
+            # sinc step update state, done, reward
+            # self.reset_internal_state(force_environment_reset=True)
+            self.state['observation'] = self.last_observation
+            self.state['depth'] = self.last_depth
+        else:
+            obs = self.lab.observations()
+            self.state['observation'] = obs['RGB_INTERLEAVED']
+            self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
 
 
 
@@ -207,6 +221,9 @@ class LabEnvironment(Environment):
         self.lab.reset(seed=self.seed)
 
         self._random_noop()
+        obs = self.lab.observations()
+        self.last_observation = obs['RGB_INTERLEAVED']
+        self.last_depth = obs['RGBD_INTERLEAVED'][:, :, -1]
 
 
     def get_target_success_rate(self):
