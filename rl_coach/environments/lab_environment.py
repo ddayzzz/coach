@@ -211,9 +211,17 @@ class LabEnvironment(Environment):
             self.state['observation'] = self.last_observation
             self.state['depth'] = self.last_depth
         else:
+            if self.state:
+                self.last_depth = self.state['depth']
+                self.last_observation = self.state['observation']
             obs = self.lab.observations()
             self.state['observation'] = obs['RGB_INTERLEAVED']
             self.state['depth'] = obs['RGBD_INTERLEAVED'][:, :, -1]
+            if not self.state:
+                self.last_depth = self.state['depth']
+                self.last_observation = self.state['observation']
+
+
 
 
 
