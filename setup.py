@@ -64,6 +64,7 @@ p = subprocess.Popen(['command -v nvidia-smi'], stdout=subprocess.PIPE, shell=Tr
 out = p.communicate()[0].decode('UTF-8')
 using_GPU = out != ''
 
+
 # if not using_GPU:
 #     if not slim_package:
 #         # For linux wth no GPU, we install the Intel optimized version of TensorFlow
@@ -86,7 +87,7 @@ extras['all'] = all_deps
 
 setup(
     name='rl-coach' if not slim_package else 'rl-coach-slim',
-    version='0.11.1',
+    version='0.12.0',
     description='Reinforcement Learning Coach enables easy experimentation with state of the art Reinforcement Learning algorithms.',
     url='https://github.com/NervanaSystems/coach',
     author='Intel AI Lab',

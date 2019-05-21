@@ -30,11 +30,6 @@ aliases:
         aws eks update-kubeconfig --name coach-aws-cicd
         sudo curl -o /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
         sudo chmod a+x /usr/local/bin/kubectl
-  - &docker_prep
-    run:
-      name: Prepare dockerfiles
-      command: |
-        aws s3 cp --recursive s3://coach-ci-dockerfiles docker
 
 version: 2
 jobs:
@@ -45,7 +40,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: Build and push base and main container
           command: |
@@ -76,7 +70,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: Build and push gym environment container
           command: |
@@ -95,7 +88,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: Build and push vizdoom environment container
           command: |
@@ -114,7 +106,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: Build and push mujoco environment container
           command: |
@@ -126,6 +117,25 @@ jobs:
             docker push ${REGISTRY}/coach-mujoco_environment:${TAG}
           no_output_timeout: 10m
 
+#  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+#  build_starcraft_env:
+#    <<: *executor_prep
+#    steps:
+#      - checkout
+#      - *remote_docker
+#      - *restore_cache
+#      - *aws_prep
+#      - run:
+#          name: Build and push starcraft environment container
+#          command: |
+#            REGISTRY=316971102342.dkr.ecr.us-west-2.amazonaws.com
+#            TAG=$(git describe --tags --always --dirty)
+#            docker pull ${REGISTRY}/coach-base:${MASTER_BRANCH}
+#            docker tag ${REGISTRY}/coach-base:${MASTER_BRANCH} coach-base:master
+#            docker build --cache-from ${REGISTRY}/coach-base:${MASTER_BRANCH} -t ${REGISTRY}/coach-starcraft_environment:${TAG} -f docker/Dockerfile.starcraft_environment .
+#            docker push ${REGISTRY}/coach-starcraft_environment:${TAG}
+#          no_output_timeout: 10m
+
   unit_tests:
     <<: *executor_prep
     steps:
@@ -133,7 +143,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run unit tests
           command: |
@@ -152,7 +161,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run integration tests
           command: |
@@ -172,12 +180,12 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run functional tests
           command: |
-            python3 rl_coach/tests/test_eks.py  -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn functional-test -tc 'make functional_tests_without_docker' -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
-          no_output_timeout: 60m
+            export FUNCTIONAL_PRESETS="'not Mujoco and not CARLA and not Doom'"
+            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn functional-test -tc "export FUNCTIONAL_PRESETS=${FUNCTIONAL_PRESETS} && make functional_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+          no_output_timeout: 30m
       - run:
           name: cleanup
           command: |
@@ -192,11 +200,10 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run gym related golden tests
           command: |
-            export GOLDEN_PRESETS='CartPole'
+            export GOLDEN_PRESETS="'CartPole or BitFlip'"
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn golden-test-gym -tc "export GOLDEN_PRESETS=${GOLDEN_PRESETS} && make golden_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-gym_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
           no_output_timeout: 30m
       - run:
@@ -213,11 +220,10 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run doom related golden tests
           command: |
-            export GOLDEN_PRESETS='Doom'
+            export GOLDEN_PRESETS="Doom"
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn golden-test-doom -tc "export GOLDEN_PRESETS=${GOLDEN_PRESETS} && make golden_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-doom_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
           no_output_timeout: 30m
       - run:
@@ -234,19 +240,100 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run mujoco related golden tests
           command: |
-            export GOLDEN_PRESETS='BitFlip or Mujoco'
+            export GOLDEN_PRESETS="Mujoco"
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn golden-test-mujoco -tc "export GOLDEN_PRESETS=${GOLDEN_PRESETS} && make golden_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-mujoco_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
-          no_output_timeout: 30m
+          no_output_timeout: 45m
       - run:
           name: cleanup
           command: |
             kubectl delete --all pods --namespace=golden-test-mujoco-${CIRCLE_BUILD_NUM} || true
             kubectl delete ns golden-test-mujoco-${CIRCLE_BUILD_NUM} || true
           when: always
+
+#  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+#  golden_test_starcraft:
+#    <<: *executor_prep
+#    steps:
+#      - checkout
+#      - *remote_docker
+#      - *restore_cache
+#      - *aws_prep
+#      - run:
+#          name: run starcraft related golden tests
+#          command: |
+#            export GOLDEN_PRESETS="Starcraft"
+#            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn golden-test-starcraft -tc "export GOLDEN_PRESETS=${GOLDEN_PRESETS} && make golden_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-starcraft_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+#          no_output_timeout: 30m
+#      - run:
+#          name: cleanup
+#          command: |
+#            kubectl delete --all pods --namespace=golden-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#            kubectl delete ns golden-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#          when: always
+
+  functional_test_mujoco:
+    <<: *executor_prep
+    steps:
+      - checkout
+      - *remote_docker
+      - *restore_cache
+      - *aws_prep
+      - run:
+          name: run mujoco related functional tests
+          command: |
+            export FUNCTIONAL_PRESETS="Mujoco"
+            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn functional-test-mujoco -tc "export FUNCTIONAL_PRESETS=${FUNCTIONAL_PRESETS} && make functional_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-mujoco_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+          no_output_timeout: 45m
+      - run:
+          name: cleanup
+          command: |
+            kubectl delete --all pods --namespace=functional-test-mujoco-${CIRCLE_BUILD_NUM} || true
+            kubectl delete ns functional-test-mujoco-${CIRCLE_BUILD_NUM} || true
+          when: always
+
+  functional_test_doom:
+    <<: *executor_prep
+    steps:
+      - checkout
+      - *remote_docker
+      - *restore_cache
+      - *aws_prep
+      - run:
+          name: run doom related functional tests
+          command: |
+            export FUNCTIONAL_PRESETS="Doom"
+            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn functional-test-doom -tc "export FUNCTIONAL_PRESETS=${FUNCTIONAL_PRESETS} && make functional_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-doom_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+          no_output_timeout: 30m
+      - run:
+          name: cleanup
+          command: |
+            kubectl delete --all pods --namespace=functional-test-doom-${CIRCLE_BUILD_NUM} || true
+            kubectl delete ns functional-test-doom-${CIRCLE_BUILD_NUM} || true
+          when: always
+
+#  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+#  functional_test_Starcraft:
+#    <<: *executor_prep
+#    steps:
+#      - checkout
+#      - *remote_docker
+#      - *restore_cache
+#      - *aws_prep
+#      - run:
+#          name: run Starcraft related functional tests
+#          command: |
+#            export FUNCTIONAL_PRESETS="Starcraft"
+#            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn functional-test-starcraft -tc "export FUNCTIONAL_PRESETS='${FUNCTIONAL_PRESETS}' && make functional_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-starcraft_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+#          no_output_timeout: 30m
+#      - run:
+#          name: cleanup
+#          command: |
+#            kubectl delete --all pods --namespace=functional-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#            kubectl delete ns functional-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#          when: always
 
   trace_test_gym:
     <<: *executor_prep
@@ -255,10 +342,10 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run gym related trace tests
           command: |
+            aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive
             export TRACE_PRESETS='CartPole_A3C,CartPole_Dueling_DDQN,CartPole_NStepQ,CartPole_DQN,CartPole_DFP,CartPole_PG,CartPole_NEC,CartPole_ClippedPPO,CartPole_PAL'
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn trace-test-gym -tc "export TRACE_PRESETS=${TRACE_PRESETS} && make trace_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-gym_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
           no_output_timeout: 30m
@@ -276,10 +363,10 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run doom related trace tests
           command: |
+            aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive
             export TRACE_PRESETS='Doom_Basic_DQN,Doom_Basic_A3C,Doom_Health_DFP'
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn trace-test-doom -tc "export TRACE_PRESETS=${TRACE_PRESETS} && make trace_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-doom_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
           no_output_timeout: 30m
@@ -297,19 +384,133 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run mujoco related trace tests
           command: |
+            aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive
             export TRACE_PRESETS='BitFlip_DQN_HER,BitFlip_DQN,Mujoco_A3C,Mujoco_A3C_LSTM,Mujoco_PPO,Mujoco_ClippedPPO,Mujoco_DDPG'
             python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn trace-test-mujoco -tc "export TRACE_PRESETS=${TRACE_PRESETS} && make trace_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-mujoco_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
-          no_output_timeout: 30m
+          no_output_timeout: 45m
       - run:
           name: cleanup
           command: |
             kubectl delete --all pods --namespace=trace-test-mujoco-${CIRCLE_BUILD_NUM} || true
             kubectl delete ns trace-test-mujoco-${CIRCLE_BUILD_NUM} || true
           when: always
+
+  update_gym_traces_test:
+    <<: *executor_prep
+    steps:
+      - checkout
+      - *remote_docker
+      - *restore_cache
+      - *aws_prep
+      - run:
+          name: Update GYM traces
+          command: |
+            kubectl create ns trace-test-gym-test-${CIRCLE_BUILD_NUM}
+            docker run -e CIRCLE_BUILD_NUM=$CIRCLE_BUILD_NUM -e TAG=$(git describe --tags --always --dirty) -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-gym_environment:$(git describe --tags --always --dirty) \
+            /bin/bash -c 'pip install awscli; curl -o /usr/local/bin/aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator \
+                          && chmod a+x /usr/local/bin/aws-iam-authenticator \
+                          && aws eks update-kubeconfig --name coach-aws-cicd \
+                          && curl -o /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl \
+                          && chmod a+x /usr/local/bin/kubectl \
+                          && kubectl config set-context $(kubectl config current-context) --namespace=trace-test-gym-test-${CIRCLE_BUILD_NUM} \
+                          && aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive \
+                          && TRACE_PRESETS="CartPole_A3C,CartPole_Dueling_DDQN,CartPole_NStepQ,CartPole_DQN,CartPole_DFP,CartPole_PG,CartPole_NEC,CartPole_ClippedPPO,CartPole_PAL" \
+                          && python3 rl_coach/tests/trace_tests.py -p ${TRACE_PRESETS} -prl -ow -ut -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-gym_environment:${TAG} -b coach-trace-gym-aws-test-${CIRCLE_BUILD_NUM}'
+            docker ps -a -q | head -n 1  | xargs -I% docker cp %:/root/src/rl_coach/traces . || true
+            aws s3 sync ~/repo/traces s3://coach-traces-aws || true
+          no_output_timeout: 30m
+      - run:
+          name: cleanup
+          command: |
+            kubectl delete --all pods --namespace=trace-test-gym-test-${CIRCLE_BUILD_NUM} || true
+            kubectl delete ns trace-test-gym-test-${CIRCLE_BUILD_NUM} || true
+          when: always
+
+  update_doom_traces_test:
+    <<: *executor_prep
+    steps:
+      - checkout
+      - *remote_docker
+      - *restore_cache
+      - *aws_prep
+      - run:
+          name: Update DOOM traces
+          command: |
+            kubectl create ns trace-test-doom-test-${CIRCLE_BUILD_NUM}
+            docker run -e CIRCLE_BUILD_NUM=$CIRCLE_BUILD_NUM -e TAG=$(git describe --tags --always --dirty) -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-doom_environment:$(git describe --tags --always --dirty) \
+            /bin/bash -c 'pip install awscli; curl -o /usr/local/bin/aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator \
+                          && chmod a+x /usr/local/bin/aws-iam-authenticator \
+                          && aws eks update-kubeconfig --name coach-aws-cicd \
+                          && curl -o /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl \
+                          && chmod a+x /usr/local/bin/kubectl \
+                          && kubectl config set-context $(kubectl config current-context) --namespace=trace-test-doom-test-${CIRCLE_BUILD_NUM} \
+                          && aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive \
+                          && TRACE_PRESETS="Doom_Basic_DQN,Doom_Basic_A3C,Doom_Health_DFP" \
+                          && python3 rl_coach/tests/trace_tests.py -p ${TRACE_PRESETS} -prl -ow -ut -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-doom_environment:${TAG} -b coach-trace-doom-aws-test-${CIRCLE_BUILD_NUM}'
+            docker ps -a -q | head -n 1  | xargs -I% docker cp %:/root/src/rl_coach/traces . || true
+            aws s3 sync ~/repo/traces s3://coach-traces-aws || true
+          no_output_timeout: 30m
+      - run:
+          name: cleanup
+          command: |
+            kubectl delete --all pods --namespace=trace-test-doom-test-${CIRCLE_BUILD_NUM} || true
+            kubectl delete ns trace-test-doom-test-${CIRCLE_BUILD_NUM} || true
+          when: always
+
+  update_mujoco_traces_test:
+    <<: *executor_prep
+    steps:
+      - checkout
+      - *remote_docker
+      - *restore_cache
+      - *aws_prep
+      - run:
+          name: Update MUJOCO traces
+          command: |
+            kubectl create ns trace-test-mujoco-test-${CIRCLE_BUILD_NUM}
+            docker run -e CIRCLE_BUILD_NUM=$CIRCLE_BUILD_NUM -e TAG=$(git describe --tags --always --dirty) -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-mujoco_environment:$(git describe --tags --always --dirty) \
+            /bin/bash -c 'pip install awscli; curl -o /usr/local/bin/aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator \
+                          && chmod a+x /usr/local/bin/aws-iam-authenticator \
+                          && aws eks update-kubeconfig --name coach-aws-cicd \
+                          && curl -o /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl \
+                          && chmod a+x /usr/local/bin/kubectl \
+                          && kubectl config set-context $(kubectl config current-context) --namespace=trace-test-mujoco-test-${CIRCLE_BUILD_NUM} \
+                          && aws s3 cp s3://coach-traces-aws rl_coach/traces --recursive \
+                          && TRACE_PRESETS="BitFlip_DQN_HER,BitFlip_DQN,Mujoco_A3C,Mujoco_A3C_LSTM,Mujoco_PPO,Mujoco_ClippedPPO,Mujoco_DDPG" \
+                          && python3 rl_coach/tests/trace_tests.py -p ${TRACE_PRESETS} -prl -ow -ut -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-mujoco_environment:${TAG} -b coach-trace-mujoco-aws-test-${CIRCLE_BUILD_NUM}'
+            docker ps -a -q | head -n 1  | xargs -I% docker cp %:/root/src/rl_coach/traces . || true
+            aws s3 sync ~/repo/traces s3://coach-traces-aws || true
+          no_output_timeout: 30m
+      - run:
+          name: cleanup
+          command: |
+            kubectl delete --all pods --namespace=trace-test-mujoco-test-${CIRCLE_BUILD_NUM} || true
+            kubectl delete ns trace-test-mujoco-test-${CIRCLE_BUILD_NUM} || true
+          when: always
+
+#  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test
+#  trace_test_starcraft:
+#    <<: *executor_prep
+#    steps:
+#      - checkout
+#      - *remote_docker
+#      - *restore_cache
+#      - *aws_prep
+#      - run:
+#          name: run starcraft related trace tests
+#          command: |
+#            export TRACE_PRESETS='Starcraft_CollectMinerals_Arc,Starcraft_CollectMinerals_Deuling_DDQN'
+#            python3 rl_coach/tests/test_eks.py -c coach-test -bn ${CIRCLE_BUILD_NUM} -tn trace-test-starcraft -tc "export TRACE_PRESETS=${TRACE_PRESETS} && make trace_tests_without_docker" -i 316971102342.dkr.ecr.us-west-2.amazonaws.com/coach-starcraft_environment:$(git describe --tags --always --dirty) -cpu 2048 -mem 4096
+#          no_output_timeout: 30m
+#      - run:
+#          name: cleanup
+#          command: |
+#            kubectl delete --all pods --namespace=trace-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#            kubectl delete ns trace-test-starcraft-${CIRCLE_BUILD_NUM} || true
+#          when: always
 
   multinode_test:
     <<: *executor_prep
@@ -318,7 +519,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: run multinode test
           command: |
@@ -353,7 +553,6 @@ jobs:
       - *remote_docker
       - *restore_cache
       - *aws_prep
-      - *docker_prep
       - run:
           name: Tag and push updated base and main container
           command: |
@@ -395,6 +594,10 @@ workflows:
           type: approval
           requires:
             - build_base
+# Keep this for debugging functional_tests for nightly jobs
+#      - functional_tests:
+#          requires:
+#            - e2e_approval
       - build_gym_env:
           requires:
             - e2e_approval
@@ -404,6 +607,9 @@ workflows:
       - build_mujoco_env:
           requires:
             - e2e_approval
+#      - build_starcraft_env:
+#          requires:
+#            - e2e_approval
       - gym_approval:
           type: approval
           requires:
@@ -416,6 +622,10 @@ workflows:
           type: approval
           requires:
             - golden_test_mujoco
+#      - starcraft_approval:
+#          type: approval
+#          requires:
+#            - golden_test_starcraft
       - golden_test_gym:
           requires:
             - build_gym_env
@@ -425,6 +635,21 @@ workflows:
       - golden_test_mujoco:
           requires:
             - build_mujoco_env
+#      - golden_test_starcraft:
+#          requires:
+#            - build_starcraft_env
+      - update_gym_traces_test:
+          requires:
+            - trace_test_gym
+          type: approval
+      - update_doom_traces_test:
+          requires:
+            - trace_test_doom
+          type: approval
+      - update_mujoco_traces_test:
+          requires:
+            - trace_test_mujoco
+          type: approval
       - trace_test_gym:
           requires:
             - gym_approval
@@ -434,6 +659,9 @@ workflows:
       - trace_test_mujoco:
           requires:
             - mujoco_approval
+#      - trace_test_starcraft:
+#          requires:
+#            - starcraft_approval
       - container_deploy:
           requires:
             - unit_tests
@@ -441,6 +669,42 @@ workflows:
           filters:
             branches:
               only: master
+  weekly:
+    triggers:
+      - schedule:
+          cron: "0 4 * * 6"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - build_gym_env
+      - build_doom_env
+      - build_mujoco_env
+      - golden_test_gym:
+          requires:
+            - build_gym_env
+      - golden_test_doom:
+          requires:
+            - build_doom_env
+            - golden_test_gym
+      - golden_test_mujoco:
+          requires:
+            - build_mujoco_env
+            - golden_test_doom
+      - trace_test_gym:
+          requires:
+            - build_gym_env
+            - golden_test_gym
+      - trace_test_doom:
+          requires:
+            - build_doom_env
+            - golden_test_doom
+      - trace_test_mujoco:
+          requires:
+            - build_mujoco_env
+            - golden_test_mujoco
+
   nightly:
     triggers:
       - schedule:
@@ -456,6 +720,20 @@ workflows:
       - build_gym_env
       - build_doom_env
       - build_mujoco_env
+      #  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+      #- build_starcraft_env
+      - functional_test_doom:
+            requires:
+              - build_doom_env
+      - functional_test_mujoco:
+            requires:
+              - build_mujoco_env
+              - functional_test_doom
+      #  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+      #- functional_test_starcraft:
+      #      requires:
+      #        - build_starcraft_env
+      #        - functional_test_mujoco
       - golden_test_gym:
           requires:
             - build_gym_env
@@ -467,12 +745,23 @@ workflows:
           requires:
             - build_mujoco_env
             - golden_test_doom
+      #  Starcraft is running too long for evaluation on nightly runs. Consider running in weekly test.
+      #- golden_test_starcraft:
+      #    requires:
+      #      - build_starcraft_env
+      #      - golden_test_mujoco
       # - trace_test_gym:
       #    requires:
       #      - build_gym_env
       # - trace_test_doom:
       #    requires:
       #      - build_doom_env
+      #      - trace_test_gym
       # - trace_test_mujoco:
       #    requires:
       #      - build_mujoco_env
+      #      - trace_test_doom
+      # - trace_test_starcraft:
+      #    requires:
+      #      - build_mujoco_env
+      #      - trace_test_mujoco
