@@ -114,6 +114,7 @@ class LabEnvironment(Environment):
         self.state_space = StateSpace(
             {'depth': ImageObservationSpace(shape=np.hstack((rgb_obs['shape'][:2], [1])), high=255)})
         self.state_space['observation'] = ImageObservationSpace(shape=rgb_obs['shape'], high=255)
+        self.state_space['']
         # reset
         self.seed = seed if seed is not None else random.seed()
         #
